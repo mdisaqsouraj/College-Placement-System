@@ -1,10 +1,10 @@
 import crypto from 'node:crypto';
 import { PracticeQuestion, PracticeSession } from '../models/Practice.js';
 import { CATEGORIES, DIFFICULTIES } from '../constants.js';
+import { aiEnabled, callAI } from './llm.js';
 import { shuffle, normText, parseJsonArray, cleanQuestion, planSlots } from '../utils/index.js';
 
-export const aiEnabled = () => !!process.env.ANTHROPIC_API_KEY;
-
+export { aiEnabled };
 const TOPICS = {
   'Quantitative Aptitude': ['Percentages', 'Profit and Loss', 'Time and Work', 'Speed, Distance, Time', 'Ratio and Proportion', 'Averages', 'Simple and Compound Interest', 'Permutation and Combination', 'Probability', 'Number System', 'Mixtures and Alligations', 'Ages', 'Mensuration', 'Pipes and Cisterns', 'Partnership'],
   'Logical Reasoning': ['Number Series', 'Blood Relations', 'Syllogisms', 'Seating Arrangement', 'Coding-Decoding', 'Direction Sense', 'Puzzles', 'Odd One Out', 'Clocks and Calendars', 'Statement and Conclusion', 'Ranking and Order'],
@@ -17,28 +17,18 @@ const LEVEL = {
   hard: 'HARD: multi-step or tricky, solvable in 1.5-2 minutes, typical of top-company placement tests.',
 };
 
-async function callClaude(prompt, maxTokens) {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-    body: JSON.stringify({ model: process.env.AI_MODEL || 'claude-haiku-5-5', max_tokens: maxTokens, messages: [{ role: 'user', content: prompt }] }),
-    signal: AbortSignal.timeout(90000),
-  });
-  if (!res.ok) throw new Error(`AI API error ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  const data = await res.json();
-  return (data.content || []).map((c) => c.text || '').join('');
-}
+
 
 // AI answer keys can be wrong, so a second independent pass solves every question; only questions where both agree are kept.
 async function verify(list) {
   if (!list.length) return [];
   const prompt = `Solve each multiple-choice question below independently and carefully.\nReply with ONLY a JSON array of integers: the 0-based index of the correct option for each question, in the same order. No other text.\n\n${JSON.stringify(list.map((q) => ({ text: q.text, options: q.options })))}`;
-  const answers = parseJsonArray(await callClaude(prompt, 1500));
+  const answers = parseJsonArray(await callAI(prompt, 1500));
   return list.filter((q, i) => answers[i] === q.correctIndex);
 }
 
-export async function generateQuestions({ category, difficulty, count }) {
-  if (!aiEnabled()) throw new Error('ANTHROPIC_API_KEY is not set in backend/.env');
+async function generateQuestionsRaw({ category, difficulty, count }) {
+  if (!aiEnabled()) throw new Error('No AI key set. Add GROQ_API_KEY or GEMINI_API_KEY in backend/.env');
   if (!CATEGORIES.includes(category) || !DIFFICULTIES.includes(difficulty)) throw new Error('Invalid category or difficulty');
   const topics = shuffle(TOPICS[category]).slice(0, 6);
   const recent = await PracticeQuestion.find({ category, difficulty }).sort({ _id: -1 }).limit(25).select('text');
@@ -53,7 +43,7 @@ Rules:
 - Do not repeat or closely copy these existing questions: ${JSON.stringify(recent.map((r) => r.text.slice(0, 80)))}
 Return ONLY a JSON array, no other text, in this shape:
 [{"topic":"...","text":"...","options":["...","...","...","..."],"correctIndex":0,"explanation":"short worked solution"}]`;
-  const raw = parseJsonArray(await callClaude(prompt, 6000));
+  const raw = parseJsonArray(await callAI(prompt, 6000));
   const cleaned = raw.map((q) => cleanQuestion(q, category, difficulty)).filter(Boolean);
   const verified = await verify(cleaned);
   const withHash = verified.map((q) => ({ ...q, hash: crypto.createHash('sha1').update(normText(q.text)).digest('hex'), source: 'ai' }));
@@ -62,6 +52,16 @@ Return ONLY a JSON array, no other text, in this shape:
   const fresh = withHash.filter((q, i, arr) => !known.has(q.hash) && !known.has(q.text) && arr.findIndex((x) => x.hash === q.hash) === i);
   if (fresh.length) await PracticeQuestion.insertMany(fresh);
   return { requested: count, generated: raw.length, accepted: fresh.length };
+}
+
+// If many students need the same questions at once, only ONE AI request is made and everyone shares it.
+const inflight = new Map();
+export function generateQuestions(args) {
+  const k = `${args.category}|${args.difficulty}`;
+  if (inflight.has(k)) return inflight.get(k);
+  const p = generateQuestionsRaw(args).finally(() => inflight.delete(k));
+  inflight.set(k, p);
+  return p;
 }
 
 /** Picks questions the student has NOT seen recently; creates new ones with AI when the bank runs short. */
@@ -86,6 +86,6 @@ export async function getQuestionsForSession({ category, difficulty, count, user
   for (let i = 0; i < slots.length; i += 4) await Promise.all(slots.slice(i, i + 4).map(run)); // max 4 parallel AI calls
 
   const questions = shuffle(chosen).slice(0, count);
-  if (questions.length < count && !notice) notice = aiEnabled() ? `Sirf ${questions.length} sawal mil paaye.` : `Sirf ${questions.length} sawal available hain. Aur sawal ke liye backend/.env mein ANTHROPIC_API_KEY set karo.`;
+  if (questions.length < count && !notice) notice = aiEnabled() ? `Sirf ${questions.length} sawal mil paaye.` : `Sirf ${questions.length} sawal available hain. Aur sawal ke liye backend/.env mein GROQ_API_KEY ya GEMINI_API_KEY set karo.`;
   return { questions, notice };
 }

@@ -127,3 +127,18 @@ The main goal of this project is to create a simple and efficient digital platfo
 **College Placement System**
 
 Developed as a college mini-project to explore full-stack web development, database management, authentication, and real-world placement management workflows.
+
+
+## Frontend setup (React + Vite)
+
+From the project directory:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open the local URL printed by Vite (normally http://localhost:5173). The root URL redirects to `/login`.
+
+The frontend currently includes UI/demo data for student and admin pages. API integration and live database data depend on the backend endpoints and configuration. Keep backend secrets in a local `backend/.env` file; it is intentionally not included in this ZIP.

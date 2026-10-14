@@ -12,6 +12,20 @@ router.use(authenticate);
 
 router.get('/', (req, res) => res.json({ user: req.user }));
 
+// Profile picture for every role. The browser sends a small (resized) data-URL image.
+router.put('/avatar', asyncHandler(async (req, res) => {
+  const a = req.body.avatar;
+  if (typeof a !== 'string' || a.length > 200000 || !/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/.test(a)) throw new HttpError(400, 'Invalid image. Use a JPG, PNG or WebP picture.');
+  req.user.avatar = a;
+  await req.user.save();
+  res.json({ user: req.user });
+}));
+router.delete('/avatar', asyncHandler(async (req, res) => {
+  req.user.avatar = undefined;
+  await req.user.save();
+  res.json({ user: req.user });
+}));
+
 // Whitelisted fields only: role, coordinator permissions, active etc. can never be changed here.
 router.put('/', requireRoles(ROLES.STUDENT), asyncHandler(async (req, res) => {
   const b = req.body, u = req.user;

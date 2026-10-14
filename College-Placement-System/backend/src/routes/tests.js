@@ -8,6 +8,7 @@ import { studentTargeted, targetFilter } from '../services/targeting.js';
 import { effectiveStatus, resultVisible } from '../services/exam.js';
 import { finalizeAttempt, answersToMap, scorable } from '../services/attempts.js';
 import { notifyUsers, audit } from '../services/notify.js';
+import { toXlsx, XLSX_MIME } from '../utils/xlsx.js';
 import { HttpError, asyncHandler, isId, requireId, paginate, pageResult, isWeekendIST, toCsv } from '../utils/index.js';
 
 const router = Router();
@@ -230,13 +231,23 @@ router.get('/:id/results', asyncHandler(async (req, res) => {
   });
 }));
 
+const RESULT_HEADER = ['Name', 'Email', 'Roll No', 'Branch', 'Year', 'Status', 'Score', 'Total Marks', 'Correct', 'Wrong', 'Unanswered', 'Tab Switches', 'Finalized By', 'Submitted At (IST)'];
+const resultRow = (r) => [r.name, r.email, r.rollNo, r.branch, r.year, r.status, r.score, r.totalMarks, r.correct, r.wrong, r.unanswered, r.tabSwitches, r.reason, r.submittedAt ? new Date(r.submittedAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : ''];
+
 router.get('/:id/results.csv', asyncHandler(async (req, res) => {
   const t = await load(req, req.params.id, { results: true });
   const rows = await collectRows(req, t);
-  await audit(req, 'test.export_results', { targetType: 'Test', targetId: t._id, details: { rows: rows.length } });
-  const csv = toCsv(['Name', 'Email', 'Roll No', 'Branch', 'Year', 'Status', 'Score', 'Total Marks', 'Correct', 'Wrong', 'Unanswered', 'Tab Switches', 'Finalized By', 'Submitted At'],
-    rows.map((r) => [r.name, r.email, r.rollNo, r.branch, r.year, r.status, r.score, r.totalMarks, r.correct, r.wrong, r.unanswered, r.tabSwitches, r.reason, r.submittedAt?.toISOString()]));
-  res.set({ 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="results-${t._id}.csv"` }).send(csv);
+  await audit(req, 'test.export_results', { targetType: 'Test', targetId: t._id, details: { rows: rows.length, format: 'csv' } });
+  res.set({ 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="results-${t._id}.csv"` }).send(toCsv(RESULT_HEADER, rows.map(resultRow)));
+}));
+
+// Excel file with auto-fitted column widths
+router.get('/:id/results.xlsx', asyncHandler(async (req, res) => {
+  const t = await load(req, req.params.id, { results: true });
+  const rows = await collectRows(req, t);
+  await audit(req, 'test.export_results', { targetType: 'Test', targetId: t._id, details: { rows: rows.length, format: 'xlsx' } });
+  const buf = await toXlsx('Results', RESULT_HEADER, rows.map(resultRow));
+  res.set({ 'Content-Type': XLSX_MIME, 'Content-Disposition': `attachment; filename="results-${t._id}.xlsx"` }).send(buf);
 }));
 
 router.get('/:id/analytics', asyncHandler(async (req, res) => {

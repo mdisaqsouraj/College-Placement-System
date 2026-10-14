@@ -10,6 +10,7 @@ import { studentScopeFilter, isAdmin } from '../services/permissions.js';
 import { studentTargeted } from '../services/targeting.js';
 import { effectiveStatus, resultVisible } from '../services/exam.js';
 import { audit } from '../services/notify.js';
+import { toXlsx, XLSX_MIME } from '../utils/xlsx.js';
 import { asyncHandler, toCsv } from '../utils/index.js';
 
 const router = Router();
@@ -34,12 +35,20 @@ router.get('/overview', requireStaff, asyncHandler(async (req, res) => {
   });
 }));
 
-router.get('/placements.csv', requireAdmin, asyncHandler(async (req, res) => {
+const PLACEMENT_HEADER = ['Student', 'Email', 'Roll No', 'Branch', 'Year', 'CGPA', 'Company', 'Drive', 'Role', 'CTC (LPA)', 'Status'];
+async function placementRows() {
   const apps = await Application.find().populate('student', 'name email student.rollNo student.branch student.year student.cgpa').populate({ path: 'drive', select: 'title role ctcLpa company', populate: { path: 'company', select: 'name' } });
-  await audit(req, 'report.export_placements', { details: { rows: apps.length } });
-  const csv = toCsv(['Student', 'Email', 'Roll No', 'Branch', 'Year', 'CGPA', 'Company', 'Drive', 'Role', 'CTC (LPA)', 'Status'],
-    apps.filter((a) => a.student && a.drive).map((a) => [a.student.name, a.student.email, a.student.student?.rollNo, a.student.student?.branch, a.student.student?.year, a.student.student?.cgpa, a.drive.company?.name, a.drive.title, a.drive.role, a.drive.ctcLpa, a.status]));
-  res.set({ 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="placements.csv"' }).send(csv);
+  return apps.filter((a) => a.student && a.drive).map((a) => [a.student.name, a.student.email, a.student.student?.rollNo, a.student.student?.branch, a.student.student?.year, a.student.student?.cgpa, a.drive.company?.name, a.drive.title, a.drive.role, a.drive.ctcLpa, a.status]);
+}
+router.get('/placements.csv', requireAdmin, asyncHandler(async (req, res) => {
+  const rows = await placementRows();
+  await audit(req, 'report.export_placements', { details: { rows: rows.length, format: 'csv' } });
+  res.set({ 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="placements.csv"' }).send(toCsv(PLACEMENT_HEADER, rows));
+}));
+router.get('/placements.xlsx', requireAdmin, asyncHandler(async (req, res) => {
+  const rows = await placementRows();
+  await audit(req, 'report.export_placements', { details: { rows: rows.length, format: 'xlsx' } });
+  res.set({ 'Content-Type': XLSX_MIME, 'Content-Disposition': 'attachment; filename="placements.xlsx"' }).send(await toXlsx('Placements', PLACEMENT_HEADER, rows));
 }));
 
 router.get('/student-dashboard', requireRoles(ROLES.STUDENT), asyncHandler(async (req, res) => {

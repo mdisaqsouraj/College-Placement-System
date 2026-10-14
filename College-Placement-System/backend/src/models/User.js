@@ -33,6 +33,7 @@ const userSchema = new Schema({
   passwordHash: { type: String, required: true, select: false },
   role: { type: String, enum: Object.values(ROLES), default: ROLES.STUDENT, index: true },
   active: { type: Boolean, default: true },
+  avatar: { type: String, maxlength: 200000 },
   student: studentSchema,
   coordinator: coordinatorSchema,
 }, { timestamps: true });

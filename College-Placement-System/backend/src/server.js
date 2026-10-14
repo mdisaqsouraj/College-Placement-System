@@ -7,6 +7,8 @@ const { finalizeAttempt } = await import('./services/attempts.js');
 
 await connectDB();
 app.listen(env.port, () => console.log(`API listening on http://localhost:${env.port}`));
+const { aiEnabled, activeProviders } = await import('./services/llm.js');
+console.log(aiEnabled() ? `AI question generation: ON (providers: ${activeProviders().join(' -> ')})` : 'AI question generation: OFF (set GROQ_API_KEY or GEMINI_API_KEY in .env to enable)');
 
 // Safety net: finalise attempts whose server-side deadline passed even if the student's browser disappeared.
 const sweep = async () => {

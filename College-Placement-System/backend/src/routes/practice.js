@@ -3,6 +3,7 @@ import { authenticate, requireRoles, requireAdmin } from '../middleware/auth.js'
 import { PracticeQuestion, PracticeSession, PracticeProfile } from '../models/Practice.js';
 import User from '../models/User.js';
 import { ROLES, CATEGORIES, DIFFICULTIES } from '../constants.js';
+import { getQuestionsForSession } from '../services/aiQuestions.js';
 import { HttpError, asyncHandler, requireId, shuffle, seededPick, istDayKey, istYesterdayKey } from '../utils/index.js';
 
 const router = Router();
@@ -34,12 +35,12 @@ async function makeSession(userId, qs, meta) {
 router.post('/sessions', student, asyncHandler(async (req, res) => {
   const { category, difficulty } = req.body;
   const count = Math.min(20, Math.max(3, Number(req.body.count) || 5));
-  const match = {};
-  if (category && category !== 'any') { if (!CATEGORIES.includes(category)) throw new HttpError(400, 'Invalid category'); match.category = category; }
-  if (difficulty && difficulty !== 'mixed') { if (!DIFFICULTIES.includes(difficulty)) throw new HttpError(400, 'Invalid difficulty'); match.difficulty = difficulty; }
-  const docs = await PracticeQuestion.aggregate([{ $match: match }, { $sample: { size: count } }]);
-  if (!docs.length) throw new HttpError(404, 'No questions available for this selection');
-  res.status(201).json(await makeSession(req.user._id, docs, { kind: 'practice', category: category || 'any', difficulty: difficulty || 'mixed' }));
+  if (category && category !== 'any' && !CATEGORIES.includes(category)) throw new HttpError(400, 'Invalid category');
+  if (difficulty && difficulty !== 'mixed' && !DIFFICULTIES.includes(difficulty)) throw new HttpError(400, 'Invalid difficulty');
+  const { questions, notice } = await getQuestionsForSession({ category, difficulty, count, userId: req.user._id });
+  if (!questions.length) throw new HttpError(404, 'No questions available for this selection');
+  const session = await makeSession(req.user._id, questions, { kind: 'practice', category: category || 'any', difficulty: difficulty || 'mixed' });
+  res.status(201).json({ ...session, notice });
 }));
 
 router.post('/daily', student, asyncHandler(async (req, res) => {
